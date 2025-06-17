@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, Response, stream_with_context
 from flask_cors import CORS
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -10,6 +10,7 @@ import os
 import mimetypes
 import re
 import base64
+import requests
 
 # Cargar variables de entorno
 load_dotenv()
@@ -25,7 +26,6 @@ db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
 
 app = Flask(__name__)
-# Configurar CORS para permitir solicitudes desde el frontend
 CORS(app, resources={r"/*": {"origins": "https://fon-yogm.onrender.com"}})
 
 def get_drive_service():
@@ -65,14 +65,20 @@ def sync_movies():
         results = service.files().list(q=query, fields="files(id, name, webContentLink, mimeType)").execute()
         files = results.get('files', [])
 
-        for file in files:
+        for index, file in enumerate(files):
             file_name = file['name']
             file_id = file['id']
             web_content_link = file.get('webContentLink')
-            # Limpiar título: quitar extensión y timestamps
+            # Limpiar título: quitar extensión, timestamps y enumerar si es necesario
             title = re.sub(r'\.[^.]+$', '', file_name)  # Quitar extensión
             title = re.sub(r'-\d{10,}', '', title)  # Quitar timestamps
             title = title.strip().replace('_', ' ').title()  # Reemplazar guiones y capitalizar
+            # Asegurar título único
+            if title.lower() == 'videoplayback':
+                title = f"Video {index + 1}"
+            exists = collection.find_one({'titulo': title})
+            if exists:
+                title = f"{title} ({index + 1})"
             # Verificar si la película ya existe
             exists = collection.find_one({'drive_file_id': file_id})
             if not exists:
@@ -81,7 +87,7 @@ def sync_movies():
                     'descripcion': f"Descripción de {title} (autogenerada)",
                     'duracion': 'Desconocida',
                     'generos': ['Género desconocido'],
-                    'miniatura': 'https://placehold.co/224x126?text=Sin+Imagen',  # Nuevo enlace
+                    'miniatura': 'https://placehold.co/224x126?text=Sin+Imagen',
                     'url_video': web_content_link or f"https://drive.google.com/uc?export=download&id={file_id}",
                     'drive_file_id': file_id,
                     'anio': '2023'
@@ -106,9 +112,22 @@ def video():
     if not doc:
         return f"No se encontró el video '{nombre}'", 404
     url_video = doc.get('url_video')
-    if url_video:
-        return redirect(url_video)
-    return f"No se encontró URL para '{nombre}'", 500
+    if not url_video:
+        return f"No se encontró URL para '{nombre}'", 500
+
+    # Proxy para transmitir el video
+    def generate():
+        try:
+            with requests.get(url_video, stream=True) as r:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=8192):
+                    yield chunk
+        except requests.RequestException as e:
+            print(f"Error al transmitir video: {e}")
+            yield b""
+
+    mime_type = mimetypes.guess_type(url_video)[0] or 'video/mp4'
+    return Response(stream_with_context(generate()), content_type=mime_type)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=9090, debug=True)
