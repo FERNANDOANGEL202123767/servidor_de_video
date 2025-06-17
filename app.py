@@ -25,9 +25,9 @@ db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://nefly-frontend.onrender.com"}})
+# Configurar CORS para permitir solicitudes desde el frontend
+CORS(app, resources={r"/*": {"origins": "https://fon-yogm.onrender.com"}})
 
-# Configurar cliente de Google Drive
 def get_drive_service():
     if not os.path.exists('token.json'):
         with open('token.json.b64', 'r') as f:
@@ -69,7 +69,11 @@ def sync_movies():
             file_name = file['name']
             file_id = file['id']
             web_content_link = file.get('webContentLink')
-            title = re.sub(r'\.[^.]+$', '', file_name)
+            # Limpiar título: quitar extensión y timestamps
+            title = re.sub(r'\.[^.]+$', '', file_name)  # Quitar extensión
+            title = re.sub(r'-\d{10,}', '', title)  # Quitar timestamps
+            title = title.strip().replace('_', ' ').title()  # Reemplazar guiones y capitalizar
+            # Verificar si la película ya existe
             exists = collection.find_one({'drive_file_id': file_id})
             if not exists:
                 movie = {
@@ -77,8 +81,8 @@ def sync_movies():
                     'descripcion': f"Descripción de {title} (autogenerada)",
                     'duracion': 'Desconocida',
                     'generos': ['Género desconocido'],
-                    'miniatura': 'https://via.placeholder.com/224x126.png?text=Sin+Imagen',
-                    'url_video': web_content_link,
+                    'miniatura': 'https://placehold.co/224x126?text=Sin+Imagen',  # Nuevo enlace
+                    'url_video': web_content_link or f"https://drive.google.com/uc?export=download&id={file_id}",
                     'drive_file_id': file_id,
                     'anio': '2023'
                 }
