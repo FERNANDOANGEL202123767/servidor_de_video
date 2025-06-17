@@ -9,6 +9,8 @@ from googleapiclient.discovery import build
 import os
 import mimetypes
 import re
+import base64
+
 
 # Cargar variables de entorno
 load_dotenv()
@@ -26,6 +28,14 @@ collection = db[COLLECTION_NAME]
 app = Flask(__name__)
 CORS(app)
 
+def get_drive_service():
+    if not os.path.exists('token.json'):
+        with open('token.json.b64', 'r') as f:
+            token_b64 = f.read()
+        with open('token.json', 'wb') as f:
+            f.write(base64.b64decode(token_b64))
+    creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive.readonly'])
+    return build('drive', 'v3', credentials=creds)
 # Configurar cliente de Google Drive
 def get_drive_service():
     creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive.readonly'])
