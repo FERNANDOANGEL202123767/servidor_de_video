@@ -11,7 +11,6 @@ import mimetypes
 import re
 import base64
 
-
 # Cargar variables de entorno
 load_dotenv()
 MONGO_URI = os.getenv('MONGO_URI')
@@ -26,18 +25,15 @@ db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "https://nefly-frontend.onrender.com"}})
 
+# Configurar cliente de Google Drive
 def get_drive_service():
     if not os.path.exists('token.json'):
         with open('token.json.b64', 'r') as f:
             token_b64 = f.read()
         with open('token.json', 'wb') as f:
             f.write(base64.b64decode(token_b64))
-    creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive.readonly'])
-    return build('drive', 'v3', credentials=creds)
-# Configurar cliente de Google Drive
-def get_drive_service():
     creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/drive.readonly'])
     return build('drive', 'v3', credentials=creds)
 
@@ -65,7 +61,6 @@ def require_auth(f):
 def sync_movies():
     try:
         service = get_drive_service()
-        # Buscar archivos en la carpeta de Google Drive
         query = f"'{DRIVE_FOLDER_ID}' in parents and mimeType contains 'video/'"
         results = service.files().list(q=query, fields="files(id, name, webContentLink, mimeType)").execute()
         files = results.get('files', [])
@@ -74,21 +69,18 @@ def sync_movies():
             file_name = file['name']
             file_id = file['id']
             web_content_link = file.get('webContentLink')
-            # Extraer título limpio (sin extensión)
             title = re.sub(r'\.[^.]+$', '', file_name)
-            # Verificar si la película ya existe
             exists = collection.find_one({'drive_file_id': file_id})
             if not exists:
-                # Insertar metadatos en MongoDB
                 movie = {
                     'titulo': title,
                     'descripcion': f"Descripción de {title} (autogenerada)",
-                    'duracion': 'Desconocida',  # Necesitarías una API para obtener duración
+                    'duracion': 'Desconocida',
                     'generos': ['Género desconocido'],
                     'miniatura': 'https://via.placeholder.com/224x126.png?text=Sin+Imagen',
                     'url_video': web_content_link,
                     'drive_file_id': file_id,
-                    'anio': '2023'  # Valor por defecto
+                    'anio': '2023'
                 }
                 collection.insert_one(movie)
                 print(f"Película '{title}' insertada en MongoDB")
