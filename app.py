@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, Response, stream_with_context
+from flask import Flask, request, Response, stream_with_context
 from flask_cors import CORS
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -115,19 +115,71 @@ def video():
     if not url_video:
         return f"No se encontró URL para '{nombre}'", 500
 
-    # Proxy para transmitir el video
-    def generate():
-        try:
-            with requests.get(url_video, stream=True) as r:
-                r.raise_for_status()
-                for chunk in r.iter_content(chunk_size=8192):
-                    yield chunk
-        except requests.RequestException as e:
-            print(f"Error al transmitir video: {e}")
-            yield b""
+    # Obtener información del archivo
+    try:
+        head_response = requests.head(url_video, allow_redirects=True)
+        head_response.raise_for_status()
+        content_length = head_response.headers.get('content-length')
+        content_type = head_response.headers.get('content-type', 'video/mp4')
+    except requests.RequestException:
+        content_type = 'video/mp4'
+        content_length = None
 
-    mime_type = mimetypes.guess_type(url_video)[0] or 'video/mp4'
-    return Response(stream_with_context(generate()), content_type=mime_type)
+    # Manejar solicitudes Range
+    range_header = request.headers.get('Range', None)
+    if not range_header:
+        def generate():
+            try:
+                with requests.get(url_video, stream=True) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        yield chunk
+            except requests.RequestException as e:
+                print(f"Error al transmitir video: {e}")
+                yield b""
+
+        headers = {
+            'Content-Type': content_type,
+            'Accept-Ranges': 'bytes'
+        }
+        if content_length:
+            headers['Content-Length'] = content_length
+
+        return Response(stream_with_context(generate()), headers=headers, status=200)
+
+    # Procesar solicitud Range
+    try:
+        ranges = re.match(r'bytes=(\d+)-(\d*)', range_header)
+        start = int(ranges.group(1))
+        end = int(ranges.group(2)) if ranges.group(2) else None
+
+        if content_length:
+            end = min(end or int(content_length) - 1, int(content_length) - 1)
+        else:
+            end = None
+
+        def generate_range():
+            headers = {'Range': f'bytes={start}-{end or ""}'}
+            try:
+                with requests.get(url_video, stream=True, headers=headers) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        yield chunk
+            except requests.RequestException as e:
+                print(f"Error al transmitir video con range: {e}")
+                yield b""
+
+        headers = {
+            'Content-Type': content_type,
+            'Accept-Ranges': 'bytes',
+            'Content-Range': f'bytes {start}-{end or "*"}/{content_length or "*"}'
+        }
+        if content_length and end is not None:
+            headers['Content-Length'] = str(end - start + 1)
+
+        return Response(stream_with_context(generate_range()), headers=headers, status=206)
+    except (ValueError, AttributeError):
+        return Response("Rango inválido", status=416)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=9090, debug=True)
