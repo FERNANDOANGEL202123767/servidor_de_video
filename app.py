@@ -28,7 +28,11 @@ collection = db[COLLECTION_NAME]
 
 app = Flask(__name__)
 Compress(app)
-CORS(app, resources={r"/*": {"origins": ["https://fon-yogm.onrender.com", "https://html-nf.netlify.app"]}})
+CORS(app, resources={r"/*": {"origins": [
+    "https://fon-yogm.onrender.com", 
+    "https://html-nf.netlify.app",
+    "https://fon-w3m0.onrender.com"
+]}})
 
 def get_drive_service():
     if not os.path.exists('token.json'):
